@@ -1,0 +1,114 @@
+zabbix_export:
+  version: '7.4'
+  media_types:
+    - name: 'MAX Bot'
+      type: WEBHOOK
+      parameters:
+        - name: Message
+          value: '{ALERT.MESSAGE}'
+        - name: Subject
+          value: '{ALERT.SUBJECT}'
+        - name: To
+          value: '{ALERT.SENDTO}'
+        - name: Token
+          value: Insert your MAX-bot token
+      script: |
+        var Max = {
+            token: null,
+            to: null,
+            message: null,
+            proxy: null,
+        
+            sendMessage: function () {
+                var request = new HttpRequest(),
+                    url = 'https://platform-api.max.ru/messages?chat_id=' + encodeURIComponent(Max.to);
+        
+                if (Max.proxy) {
+                    request.setProxy(Max.proxy);
+                }
+        
+                request.addHeader('Authorization: ' + Max.token);
+                request.addHeader('Content-Type: application/json');
+        
+                var data = JSON.stringify({
+                    text: Max.message
+                });
+        
+                Zabbix.log(4, '[MAX] URL: ' + url);
+                Zabbix.log(4, '[MAX] payload: ' + data);
+        
+                var response = request.post(url, data);
+                var status = request.getStatus();
+        
+                Zabbix.log(4, '[MAX] status: ' + status);
+                Zabbix.log(4, '[MAX] response: ' + response);
+        
+                if (status < 200 || status >= 300) {
+                    throw 'HTTP ' + status + ': ' + response;
+                }
+            }
+        };
+        
+        try {
+            var params = JSON.parse(value);
+        
+            if (!params.Token) {
+                throw 'Token missing';
+            }
+        
+            if (!params.To) {
+                throw 'chat_id missing';
+            }
+        
+            Max.token = params.Token;
+            Max.to = params.To;
+        
+            if (params.HTTPProxy) {
+                Max.proxy = params.HTTPProxy;
+            }
+        
+            // ВОТ ГЛАВНОЕ — берём из шаблона Zabbix
+            var subject = params.Subject || '';
+            var message = params.Message || '';
+        
+            Max.message = subject + '\n' + message;
+        
+            Max.sendMessage();
+        
+            return 'OK';
+        }
+        catch (error) {
+            Zabbix.log(4, '[MAX] failed: ' + error);
+            throw 'Sending failed: ' + error;
+        }
+      message_templates:
+        - event_source: TRIGGERS
+          operation_mode: PROBLEM
+          subject: '🚨 Проблема на {HOST.NAME} ({HOST.IP})'
+          message: |
+            Проблема: {EVENT.NAME}
+            🕒 Обнаружена: {EVENT.TIME}, {EVENT.DATE}
+            ⚠️ Важность: {EVENT.SEVERITY}
+            📊 Данные: {EVENT.OPDATA}
+        - event_source: TRIGGERS
+          operation_mode: RECOVERY
+          subject: '✅ Проблема решена на {HOST.NAME}'
+          message: |
+            Проблема: {EVENT.NAME}
+            ⏱ Продолжительность: {EVENT.DURATION}
+            🕒 Время решения: {EVENT.RECOVERY.TIME}, {EVENT.RECOVERY.DATE}
+            ⚠️ Важность: {EVENT.SEVERITY}
+            🆔 ID события: {EVENT.ID}
+        - event_source: TRIGGERS
+          operation_mode: UPDATE
+          subject: '🔄 Обновление проблемы на {HOST.NAME}'
+          message: |
+            Проблема: {EVENT.NAME}
+            ✏️ {USER.FULLNAME} {EVENT.UPDATE.ACTION}
+            🕒 Обновлено: {EVENT.UPDATE.TIME}, {EVENT.UPDATE.DATE}
+            🗒 Комментарий:
+            {EVENT.UPDATE.MESSAGE}
+            
+            📌 Статус: {EVENT.STATUS}
+            ⏱ Возраст: {EVENT.AGE}
+            📥 Подтверждено: {EVENT.ACK.STATUS}
